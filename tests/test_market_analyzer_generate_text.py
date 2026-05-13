@@ -775,9 +775,9 @@ Sector text.
         assert "Advancers **3200**" in result
         assert "Turnover **14567** (CNY 100m)" in result
         assert "| Index | Last | Change % | Open | High | Low | Amplitude | Turnover (CNY 100m) |" in result
-        assert "#### Leading Sectors" in result
+        assert "#### Leading Industries" in result
         assert "| 1 | AI算力 | +3.25% |" in result
-        assert "#### Lagging Sectors" in result
+        assert "#### Lagging Industries" in result
         assert "| 1 | 煤炭 | -1.12% |" in result
 
     def test_inject_data_into_review_matches_reference_style_chinese_headings(self):
@@ -827,15 +827,16 @@ Sector text.
 
         result = ma._inject_data_into_review(review, overview, news)
 
-        assert "大盘红绿灯" in result
-        assert "green（可进攻）" in result
-        assert "核心原因" in result
-        assert "操作建议" in result
-        assert "盘面温度" in result
+        assert "盘面评分" in result
+        assert "（偏暖，可进攻）" in result
+        assert "评分依据" in result
+        assert "操作节奏" in result
+        assert "大盘红绿灯" not in result
+        assert "████" not in result
         assert "| 上涨/下跌/平盘 | 3200 / 1800 / 100 |" in result
         assert "| 指数 | 最新 | 涨跌幅 | 开盘 | 最高 | 最低 | 振幅 | 成交额(亿) |" in result
         assert "| 上证指数 | 3300.00 | 🟢 +0.36% | 3288.00 | 3312.00 | 3276.00 | 1.10% | 1450 |" in result
-        assert "#### 领涨板块 Top 5" in result
+        assert "#### 行业涨跌 Top 5" in result
         assert "| 1 | AI算力 | +3.25% |" in result
         assert "#### 近三日催化线索" in result
         assert "AI算力板块走强" in result
@@ -905,6 +906,47 @@ Sector text.
         assert long_url not in prompt
         assert "URL: https://example.com/redirect?" in prompt
         assert ("x" * 220) not in prompt
+
+    def test_inject_data_adds_hot_stocks_and_limit_up_ladder(self):
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value="review")
+        overview = MarketOverview(
+            date="2026-05-06",
+            hot_stocks=[
+                {
+                    "rank": 1,
+                    "code": "SZ000066",
+                    "name": "中国长城",
+                    "change_pct": 9.99,
+                    "price": 21.8,
+                    "source": "东方财富人气榜",
+                },
+            ],
+            limit_up_stocks=[
+                {
+                    "code": "603399",
+                    "name": "永杉锂业",
+                    "consecutive_boards": 4,
+                    "industry": "能源金属",
+                    "first_limit_time": "092501",
+                    "amount": 162913421,
+                }
+            ],
+        )
+        review = """## 2026-05-06 大盘复盘
+
+### 四、热门股票与连板
+情绪。
+"""
+
+        result = ma._inject_data_into_review(review, overview)
+
+        assert "#### 人气股票 Top 8" in result
+        assert "| 1 | SZ000066 | 中国长城 | +9.99% | 21.80 | 东方财富人气榜 |" in result
+        assert "#### 涨停连板梯队" in result
+        assert "4板 1只" in result
+        assert "| 603399 | 永杉锂业 | 4 | 能源金属 | 09:25 | 1.63 |" in result
 
     def test_market_light_snapshot_marks_defensive_market_red(self):
         from src.market_analyzer import MarketIndex, MarketOverview
