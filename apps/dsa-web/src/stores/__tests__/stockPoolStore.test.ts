@@ -760,6 +760,141 @@ describe('stockPoolStore', () => {
     expect(state.selectedReport?.meta.stockCode).toBe('AAPL');
   });
 
+  it('does not auto-switch to completed-task latest when the selected report changed before the refresh response returns', async () => {
+    const latestItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      createdAt: '2026-03-18T09:00:00Z',
+    };
+    const latestCompletedReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 2,
+        queryId: 'q-2',
+        createdAt: '2026-03-18T09:00:00Z',
+      },
+    };
+    const switchedReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 3,
+        queryId: 'q-3',
+      },
+    };
+    const completedRefreshResponse = createDeferred<HistoryListResponse>();
+
+    useStockPoolStore.setState({
+      historyItems: [historyItem],
+      selectedReport: historyReport,
+    });
+    vi.mocked(historyApi.getList).mockReturnValue(completedRefreshResponse.promise);
+    vi.mocked(historyApi.getDetail).mockResolvedValue(latestCompletedReport);
+
+    const completedRefreshPromise = useStockPoolStore.getState().refreshHistoryForCompletedTask(createTask({
+      status: 'completed',
+      progress: 100,
+    }));
+
+    useStockPoolStore.setState({
+      selectedReport: switchedReport,
+    });
+
+    completedRefreshResponse.resolve({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestItem, historyItem],
+    });
+    await completedRefreshPromise;
+
+    const state = useStockPoolStore.getState();
+    expect(state.historyItems.map((item) => item.id)).toEqual([2, 1]);
+    expect(state.selectedReport?.meta.id).toBe(3);
+    expect(historyApi.getDetail).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-switch report when user selection is pending during completed-task refresh', async () => {
+    const latestItem = {
+      ...historyItem,
+      id: 2,
+      queryId: 'q-2',
+      createdAt: '2026-03-18T09:00:00Z',
+    };
+    const completedRefreshResponse = createDeferred<HistoryListResponse>();
+    const userSelectionDetail = createDeferred<unknown>();
+    const userSelectionReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 3,
+        queryId: 'q-3',
+        stockCode: 'AAPL',
+        stockName: 'Apple',
+        createdAt: '2026-03-18T07:00:00Z',
+      },
+    };
+    const latestCompletedReport = {
+      ...historyReport,
+      meta: {
+        ...historyReport.meta,
+        id: 2,
+        queryId: 'q-2',
+        createdAt: '2026-03-18T09:00:00Z',
+      },
+    };
+
+    useStockPoolStore.setState({
+      historyItems: [
+        historyItem,
+        {
+          ...historyItem,
+          id: 3,
+          queryId: 'q-3',
+          stockCode: 'AAPL',
+          stockName: 'Apple',
+          createdAt: '2026-03-18T07:00:00Z',
+        },
+      ],
+      selectedReport: historyReport,
+    });
+    vi.mocked(historyApi.getList).mockReturnValueOnce(completedRefreshResponse.promise);
+    vi.mocked(historyApi.getDetail)
+      .mockReturnValueOnce(userSelectionDetail.promise)
+      .mockResolvedValue(latestCompletedReport);
+
+    const completedRefreshPromise = useStockPoolStore.getState().refreshHistoryForCompletedTask(
+      createTask({
+        status: 'completed',
+        progress: 100,
+      }),
+    );
+    const manualSelectionPromise = useStockPoolStore.getState().selectHistoryItem(3);
+
+    completedRefreshResponse.resolve({
+      total: 2,
+      page: 1,
+      limit: 20,
+      items: [latestItem, historyItem],
+    });
+    await completedRefreshPromise;
+
+    const midState = useStockPoolStore.getState();
+    expect(midState.selectedReport?.meta.id).toBe(historyReport.meta.id);
+    expect(historyApi.getDetail).toHaveBeenCalledWith(3);
+    expect(historyApi.getDetail).toHaveBeenCalledTimes(1);
+
+    userSelectionDetail.resolve(userSelectionReport);
+    await manualSelectionPromise;
+
+    const state = useStockPoolStore.getState();
+    expect(state.selectedReport?.meta.id).toBe(3);
+    expect(state.selectedReport?.meta.stockCode).toBe('AAPL');
+    expect(state.historyItems.map((item) => item.id)).toEqual([2, 1, 3]);
+  });
+
   it('ignores late history responses after dashboard reset', async () => {
     const deferred = createDeferred<{
       total: number;

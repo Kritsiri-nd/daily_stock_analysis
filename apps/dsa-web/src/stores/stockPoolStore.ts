@@ -33,6 +33,11 @@ type SubmitAnalysisOptions = {
   reportLanguage?: ReportLanguage;
 };
 
+type CompletedTaskSelectionIntent = {
+  manualSelectionSeq: number;
+  selectedReportId: number | undefined;
+};
+
 let reportRequestSeq = 0;
 let analyzeRequestSeq = 0;
 let historyRequestSeq = 0;
@@ -40,8 +45,10 @@ let marketReviewHistoryRequestSeq = 0;
 let stockHistoryRequestSeq = 0;
 let activeTaskRequestSeq = 0;
 let activeTaskLocalRevision = 0;
+let manualSelectionRequestSeq = 0;
+let manualSelectionRequestId = 0;
 const dismissedTaskIds = new Set<string>();
-const pendingCompletedTaskSelectionKeys = new Set<string>();
+const pendingCompletedTaskSelectionKeys = new Map<string, CompletedTaskSelectionIntent>();
 
 export interface StockPoolState {
   query: string;
@@ -96,7 +103,7 @@ export interface StockPoolState {
   loadMarketReviewHistory: () => Promise<void>;
   refreshMarketReviewHistory: (silent?: boolean) => Promise<void>;
   loadMoreMarketReviewHistory: () => Promise<void>;
-  selectHistoryItem: (recordId: number) => Promise<void>;
+  selectHistoryItem: (recordId: number, isUserInitiated?: boolean) => Promise<void>;
   toggleHistorySelection: (recordId: number) => void;
   toggleSelectAllVisible: () => void;
   deleteSelectedHistory: () => Promise<void>;
@@ -247,15 +254,25 @@ function normalizeStockCodeKey(stockCode: string | undefined): string {
   return trimmed ? normalizeStockCode(trimmed).toUpperCase() : '';
 }
 
-function queueCompletedTaskSelection(stockCode: string | undefined): void {
+function queueCompletedTaskSelection(
+  stockCode: string | undefined,
+  selectedReport: AnalysisReport | null,
+): void {
   const key = normalizeStockCodeKey(stockCode);
   if (key) {
-    pendingCompletedTaskSelectionKeys.add(key);
+    pendingCompletedTaskSelectionKeys.set(key, {
+      manualSelectionSeq: manualSelectionRequestSeq,
+      selectedReportId: selectedReport?.meta.id,
+    });
   }
 }
 
 function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: AnalysisReport | null): HistoryItem | undefined {
   if (pendingCompletedTaskSelectionKeys.size === 0) {
+    return undefined;
+  }
+  if (manualSelectionRequestId !== 0) {
+    pendingCompletedTaskSelectionKeys.clear();
     return undefined;
   }
 
@@ -266,12 +283,23 @@ function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: Ana
 
   if (selectedReport) {
     const selectedStockCode = normalizeStockCodeKey(selectedReport.meta.stockCode);
-    if (!selectedStockCode || !pendingCompletedTaskSelectionKeys.has(selectedStockCode)) {
+    const pendingSelectionIntent = selectedStockCode
+      ? pendingCompletedTaskSelectionKeys.get(selectedStockCode)
+      : undefined;
+    if (!selectedStockCode || pendingSelectionIntent === undefined) {
+      pendingCompletedTaskSelectionKeys.clear();
+      return undefined;
+    }
+    if (pendingSelectionIntent.manualSelectionSeq !== manualSelectionRequestSeq) {
+      pendingCompletedTaskSelectionKeys.clear();
+      return undefined;
+    }
+    if (pendingSelectionIntent.selectedReportId !== selectedReport.meta.id) {
       pendingCompletedTaskSelectionKeys.clear();
       return undefined;
     }
 
-    for (const key of Array.from(pendingCompletedTaskSelectionKeys)) {
+    for (const key of Array.from(pendingCompletedTaskSelectionKeys.keys())) {
       if (key !== selectedStockCode) {
         pendingCompletedTaskSelectionKeys.delete(key);
       }
@@ -293,7 +321,8 @@ function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: Ana
       return false;
     }
     const stockCode = normalizeStockCodeKey(item.stockCode);
-    return stockCode.length > 0 && pendingCompletedTaskSelectionKeys.has(stockCode);
+    const pendingSelectionIntent = pendingCompletedTaskSelectionKeys.get(stockCode);
+    return stockCode.length > 0 && pendingSelectionIntent?.manualSelectionSeq === manualSelectionRequestSeq;
   });
   if (latestItem) {
     pendingCompletedTaskSelectionKeys.clear();
@@ -425,7 +454,7 @@ async function fetchHistory(
   const currentState = get();
   const page = reset ? 1 : currentState.currentPage + 1;
   if (reset) {
-    queueCompletedTaskSelection(selectLatestForStockCode);
+    queueCompletedTaskSelection(selectLatestForStockCode, currentState.selectedReport);
   }
   const requestId = ++historyRequestSeq;
 
@@ -475,9 +504,9 @@ async function fetchHistory(
       const latestCompletedTaskItem = consumeCompletedTaskSelection(response.items, get().selectedReport);
       const selectedReport = get().selectedReport;
       if (latestCompletedTaskItem && latestCompletedTaskItem.id !== selectedReport?.meta.id) {
-        await get().selectHistoryItem(latestCompletedTaskItem.id);
+        await get().selectHistoryItem(latestCompletedTaskItem.id, false);
       } else if (autoSelectFirst && response.items.length > 0 && !selectedReport) {
-        await get().selectHistoryItem(response.items[0].id);
+        await get().selectHistoryItem(response.items[0].id, false);
       }
     }
 
@@ -663,8 +692,12 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     await fetchMarketReviewHistory(get, set, { reset: false });
   },
 
-  selectHistoryItem: async (recordId) => {
+  selectHistoryItem: async (recordId, isUserInitiated = true) => {
     const requestId = ++reportRequestSeq;
+    if (isUserInitiated) {
+      manualSelectionRequestSeq += 1;
+      manualSelectionRequestId = requestId;
+    }
     const shouldShowInitialLoading = !get().selectedReport;
 
     if (shouldShowInitialLoading) {
@@ -702,6 +735,10 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
         error: getParsedApiError(error),
         isLoadingReport: false,
       });
+    } finally {
+      if (isUserInitiated && manualSelectionRequestId === requestId) {
+        manualSelectionRequestId = 0;
+      }
     }
   },
 
@@ -751,7 +788,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       if (selectedWasDeleted) {
         const nextItem = freshPage?.items?.[0];
         if (nextItem) {
-          await get().selectHistoryItem(nextItem.id);
+          await get().selectHistoryItem(nextItem.id, false);
         } else {
           stockHistoryRequestSeq += 1;
           resetStockHistoryState(set);
@@ -815,7 +852,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       if (selectedWasDeleted) {
         const nextItem = freshPage?.items?.[0];
         if (nextItem) {
-          await get().selectHistoryItem(nextItem.id);
+          await get().selectHistoryItem(nextItem.id, false);
         } else {
           set({ selectedReport: null });
         }
@@ -999,6 +1036,8 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     stockHistoryRequestSeq += 1;
     reportRequestSeq = 0;
     analyzeRequestSeq = 0;
+    manualSelectionRequestSeq = 0;
+    manualSelectionRequestId = 0;
     activeTaskRequestSeq += 1;
     activeTaskLocalRevision += 1;
     dismissedTaskIds.clear();
