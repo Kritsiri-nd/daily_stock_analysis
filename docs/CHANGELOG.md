@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 - [修复] 推送报告、Jinja 报告与历史 Markdown 导出复用 Web/API 的评分-action 口径：高分但旧 `operation_advice` 仍为持有且无降级原因时，建议文案与三类统计展示为买入；有明确 guardrail reason 时继续保留持有/观望。
-- [文档] #1949 补齐 PR 交付说明一致性：本次变更覆盖 13 个文件（含 `src/report_language.py` 与 `tests/test_report_language.py`），`HEAD CI` 为 pass；结构化检测提示中的模型/provider/base URL/运行时配置项为描述模板触发，不属于本次代码变更；本轮未新增 `.env`、配置保存/清理/迁移分支，也未改写 provider/model/base URL 路由语义；回退路径为按版本回滚本次变更。
+- [文档] #1949 补齐 PR 交付说明一致性：本次变更覆盖 13 个文件（含 `src/report_language.py` 与 `tests/test_report_language.py`），与本地 Diff 及变更列表一致；`HEAD CI` 为 pass。结构化检测中出现的模型/provider/base URL/运行时配置提示为当前项目能力检测与诊断输出文本，不是本次代码逻辑引入；本轮不改 `.env`、不改配置保存/清理/迁移分支，也不改 provider / model / base URL 的保存、读取与路由语义；回退路径为按版本回滚本次变更。
 - [改进] GitHub Actions 每日分析工作流补齐 TickFlow 数据源环境变量映射，并收敛 README 数据源稳定性说明到完整指南。
 - [修复] WebUI 启动时显式 `--host` / `--port` 不再被 `.env` 中的 `WEBUI_HOST` / `WEBUI_PORT` 覆盖，未传 CLI 参数时统一使用解析后的运行时配置。
 - [改进] GitHub Actions: 每日分析工作流（`00-daily-analysis.yml`）新增钉钉通知环境变量映射，支持在云端定时任务中直接使用钉钉机器人。
