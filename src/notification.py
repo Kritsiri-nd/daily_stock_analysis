@@ -233,7 +233,7 @@ class NotificationService(
         # 仅分析结果摘要（Issue #262）：true 时只推送汇总，不含个股详情
         self._report_summary_only = getattr(config, 'report_summary_only', False)
         self._report_show_llm_model = getattr(config, 'report_show_llm_model', True)
-        self._history_compare_cache: Dict[Tuple[int, Tuple[Tuple[str, str], ...]], Dict[str, List[Dict[str, Any]]]] = {}
+        self._history_compare_cache: Dict[Tuple[int, str, Tuple[Tuple[str, str], ...]], Dict[str, List[Dict[str, Any]]]] = {}
 
         # 初始化各渠道
         AstrbotSender.__init__(self, config)
@@ -305,6 +305,7 @@ class NotificationService(
 
         cache_key = (
             history_compare_n,
+            report_language,
             tuple(sorted((r.code, getattr(r, 'query_id', '') or '') for r in results)),
         )
         if cache_key in self._history_compare_cache:

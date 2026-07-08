@@ -1896,6 +1896,45 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         )
 
     @mock.patch("src.notification.get_config")
+    def test_history_compare_context_cache_key_includes_report_language(
+        self, mock_get_config: mock.MagicMock
+    ):
+        mock_get_config.return_value = _make_config(report_history_compare_n=2)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+            report_language="en",
+            query_id="q-lang",
+        )
+
+        def fake_signal_changes(codes, **kwargs):
+            report_language = kwargs["report_language"]
+            return {codes[0]: [{"action_label": f"{report_language}-label"}]}
+
+        with mock.patch(
+            "src.services.history_comparison_service.get_signal_changes_batch",
+            side_effect=fake_signal_changes,
+        ) as mock_batch:
+            first = service._get_history_compare_context([result])
+            result.report_language = "zh"
+            second = service._get_history_compare_context([result])
+
+        self.assertEqual(
+            first,
+            {"history_by_code": {"600519": [{"action_label": "en-label"}]}},
+        )
+        self.assertEqual(
+            second,
+            {"history_by_code": {"600519": [{"action_label": "zh-label"}]}},
+        )
+        self.assertEqual(mock_batch.call_count, 2)
+
+    @mock.patch("src.notification.get_config")
     @mock.patch("smtplib.SMTP_SSL")
     def test_send_to_email_via_notification_service(
         self, mock_smtp_ssl: mock.MagicMock, mock_get_config: mock.MagicMock
