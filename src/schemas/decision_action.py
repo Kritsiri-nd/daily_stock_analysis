@@ -40,7 +40,14 @@ _ACTION_LABELS: Dict[str, Dict[str, str]] = {
     "alert": {"zh": "预警", "en": "Alert", "ko": "경고"},
 }
 
+_LOCALIZED_EXPLICIT_ALIASES: Dict[str, DecisionAction] = {
+    label: action
+    for action, labels in _ACTION_LABELS.items()
+    for label in labels.values()
+}
+
 _EXPLICIT_ALIASES: Dict[str, DecisionAction] = {
+    **_LOCALIZED_EXPLICIT_ALIASES,
     "strong buy": "buy",
     "accumulate": "add",
     "trim": "reduce",

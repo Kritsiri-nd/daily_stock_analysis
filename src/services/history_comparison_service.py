@@ -27,12 +27,13 @@ def _record_to_signal(record: Any) -> Optional[Dict[str, Any]]:
         raw_result = {}
 
     operation_advice = raw_result.get("operation_advice") or getattr(record, "operation_advice", None)
+    explicit_action = raw_result.get("action") or raw_result.get("action_label")
     report_language = normalize_report_language(
         raw_result.get("report_language") or getattr(record, "report_language", None)
     )
     action_fields = build_action_fields(
         operation_advice=operation_advice,
-        explicit_action=raw_result.get("action"),
+        explicit_action=explicit_action,
         report_type=getattr(record, "report_type", None),
         report_language=report_language,
         sentiment_score=getattr(record, "sentiment_score", None),
