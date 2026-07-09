@@ -162,6 +162,142 @@ def _symbol_scope_lookup_values(code: str, market: str) -> List[str]:
     return values
 
 
+def _safe_report_text(value: Any, fallback: str = "N/A") -> str:
+    text = str(value or "").strip()
+    return text if text else fallback
+
+
+def _first_text(value: Any, fallback: str = "N/A") -> str:
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            text = _safe_report_text(item, "")
+            if text:
+                return text
+        return fallback
+    return _safe_report_text(value, fallback)
+
+
+def _format_discord_stock_summary(result: AnalysisResult, language: str) -> str:
+    dashboard = result.dashboard if isinstance(result.dashboard, dict) else {}
+    core = dashboard.get("core_conclusion") if isinstance(dashboard, dict) else {}
+    core = core if isinstance(core, dict) else {}
+    battle_plan = dashboard.get("battle_plan") if isinstance(dashboard, dict) else {}
+    battle_plan = battle_plan if isinstance(battle_plan, dict) else {}
+    sniper = battle_plan.get("sniper_points") if isinstance(battle_plan, dict) else {}
+    sniper = sniper if isinstance(sniper, dict) else {}
+    phase = dashboard.get("phase_decision") if isinstance(dashboard, dict) else {}
+    phase = phase if isinstance(phase, dict) else {}
+    intelligence = dashboard.get("intelligence") if isinstance(dashboard, dict) else {}
+    intelligence = intelligence if isinstance(intelligence, dict) else {}
+
+    action = localize_operation_advice(
+        getattr(result, "operation_advice", None) or core.get("signal_type") or "hold",
+        language,
+    )
+    trend = localize_trend_prediction(getattr(result, "trend_prediction", None), language)
+    confidence = localize_confidence_level(getattr(result, "confidence_level", None), language)
+    score = getattr(result, "sentiment_score", None)
+    score_text = str(score) if score is not None else "N/A"
+
+    name = _safe_report_text(getattr(result, "name", ""), "Unknown")
+    code = _safe_report_text(getattr(result, "code", ""), "")
+    title = f"**{name} ({code})**" if code else f"**{name}**"
+
+    one_line = _safe_report_text(core.get("one_sentence"), getattr(result, "analysis_summary", "") or "")
+    position_advice = core.get("position_advice")
+    position_advice = position_advice if isinstance(position_advice, dict) else {}
+    no_position = _safe_report_text(position_advice.get("no_position"), "")
+    holding = _safe_report_text(position_advice.get("holding"), "")
+    ideal = _safe_report_text(sniper.get("ideal_buy"), "รอจุดเข้าที่ชัดเจน")
+    stop = _safe_report_text(sniper.get("stop_loss"), "กำหนดจุดตัดขาดทุนตามแนวรับหลัก")
+    target = _safe_report_text(sniper.get("take_profit"), "ทยอยทำกำไรใกล้แนวต้าน")
+    watch = _first_text(phase.get("watch_conditions"), "จับตาราคาและปริมาณซื้อขาย")
+    risk = _first_text(
+        intelligence.get("risk_alerts")
+        or phase.get("data_limitations")
+        or getattr(result, "risk_warning", ""),
+        "ไม่มีสัญญาณความเสี่ยงเด่น",
+    )
+
+    if language == "th":
+        lines = [
+            title,
+            f"สัญญาณ: **{action}** | คะแนน {score_text} | แนวโน้ม {trend} | ความมั่นใจ {confidence}",
+        ]
+        if one_line:
+            lines.append(f"สรุป: {one_line}")
+        lines.extend(
+            [
+                f"จุดเข้า: {ideal}",
+                f"จุดตัดขาดทุน: {stop}",
+                f"เป้าหมาย: {target}",
+                f"จับตา: {watch}",
+                f"ความเสี่ยง: {risk}",
+            ]
+        )
+        if no_position:
+            lines.append(f"ยังไม่มีของ: {no_position}")
+        if holding:
+            lines.append(f"ถืออยู่: {holding}")
+        return "\n".join(lines)
+
+    lines = [
+        title,
+        f"Action: **{action}** | Score {score_text} | Trend {trend} | Confidence {confidence}",
+    ]
+    if one_line:
+        lines.append(f"Summary: {one_line}")
+    lines.extend(
+        [
+            f"Entry: {ideal}",
+            f"Stop: {stop}",
+            f"Target: {target}",
+            f"Watch: {watch}",
+            f"Risk: {risk}",
+        ]
+    )
+    if no_position:
+        lines.append(f"No position: {no_position}")
+    if holding:
+        lines.append(f"Holding: {holding}")
+    return "\n".join(lines)
+
+
+def _generate_discord_report_summary(results: List[AnalysisResult], report_type: ReportType) -> str:
+    language = normalize_report_language(
+        getattr(results[0], "report_language", None) if results else None
+    )
+    today = datetime.now().strftime("%Y-%m-%d")
+    valid_results = [result for result in results if getattr(result, "success", True)]
+    buy_count = sum(1 for result in valid_results if getattr(result, "decision_type", "") == "buy")
+    sell_count = sum(1 for result in valid_results if getattr(result, "decision_type", "") == "sell")
+    watch_count = max(0, len(valid_results) - buy_count - sell_count)
+
+    if language == "th":
+        header = [
+            f"🎯 **{today} สรุปหุ้นแบบอ่านง่าย**",
+            f"วิเคราะห์ {len(valid_results)} หุ้น | ซื้อ {buy_count} | รอดู {watch_count} | ขาย {sell_count}",
+            "",
+        ]
+        footer = [
+            "",
+            "รายงานเต็มยังถูกบันทึกเป็นไฟล์ Markdown (`reports/report_YYYYMMDD.md`) สำหรับดูรายละเอียด/ตารางครบถ้วน",
+        ]
+    else:
+        header = [
+            f"🎯 **{today} Stock Summary**",
+            f"Analyzed {len(valid_results)} stocks | Buy {buy_count} | Watch {watch_count} | Sell {sell_count}",
+            "",
+        ]
+        footer = [
+            "",
+            "Full Markdown report is still saved as `reports/report_YYYYMMDD.md` for detailed tables.",
+        ]
+
+    sections = [_format_discord_stock_summary(result, language) for result in valid_results]
+    return "\n\n---\n\n".join(header + sections + footer)
+
+
 class StockAnalysisPipeline:
     """
     股票分析主流程调度器
@@ -3511,7 +3647,9 @@ class StockAnalysisPipeline:
                     elif channel == NotificationChannel.DISCORD:
                         channel_success, channel_error = _send_channel_safely(
                             channel.value,
-                            lambda: self.notifier.send_to_discord(report),
+                            lambda: self.notifier.send_to_discord(
+                                _generate_discord_report_summary(results, report_type)
+                            ),
                         )
                         non_wechat_success = channel_success or non_wechat_success
                         _record_channel_result(

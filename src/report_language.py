@@ -107,6 +107,13 @@ _TREND_PREDICTION_CANONICAL_MAP = {
     "횡보": "sideways",
     "하락": "bearish",
     "강한 하락": "strong_bearish",
+    "ขาขึ้นแข็งแรงมาก": "strong_bullish",
+    "ขาขึ้น": "bullish",
+    "ดูบวก": "bullish",
+    "ดูถูกมาก": "bullish",
+    "แกว่งตัว": "sideways",
+    "ขาลง": "bearish",
+    "ขาลงแข็งแรงมาก": "strong_bearish",
 }
 
 _TREND_PREDICTION_TRANSLATIONS = {
@@ -128,6 +135,10 @@ _CONFIDENCE_LEVEL_CANONICAL_MAP = {
     "높음": "high",
     "보통": "medium",
     "낮음": "low",
+    "สูง": "high",
+    "ปานกลาง": "medium",
+    "กลาง": "medium",
+    "ต่ำ": "low",
 }
 
 _CONFIDENCE_LEVEL_TRANSLATIONS = {
