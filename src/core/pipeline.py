@@ -3645,11 +3645,21 @@ class StockAnalysisPipeline:
                             channel_error,
                         )
                     elif channel == NotificationChannel.DISCORD:
+                        def _send_discord_report() -> bool:
+                            discord_summary = _generate_discord_report_summary(results, report_type)
+                            date_str = datetime.now().strftime('%Y%m%d')
+                            filepath = self.notifier.save_report_to_file(
+                                report,
+                                filename=f"dashboard_{date_str}.md",
+                            )
+                            send_file = getattr(self.notifier, "send_discord_file", None)
+                            if callable(send_file):
+                                return bool(send_file(discord_summary, filepath))
+                            return self.notifier.send_to_discord(discord_summary)
+
                         channel_success, channel_error = _send_channel_safely(
                             channel.value,
-                            lambda: self.notifier.send_to_discord(
-                                _generate_discord_report_summary(results, report_type)
-                            ),
+                            _send_discord_report,
                         )
                         non_wechat_success = channel_success or non_wechat_success
                         _record_channel_result(

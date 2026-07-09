@@ -5,8 +5,10 @@ Discord 发送提醒服务
 职责：
 1. 通过 webhook 或 Discord bot API 发送 Discord 消息
 """
+import json
 import logging
 import time
+from pathlib import Path
 from typing import Optional
 
 import requests
@@ -91,6 +93,36 @@ class DiscordSender:
         logger.warning("Discord 配置不完整，跳过推送")
         return False
 
+    def send_discord_file(
+        self,
+        content: str,
+        file_path: str,
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> bool:
+        """Send a Discord message with one file attachment."""
+        path = Path(file_path)
+        if not path.exists() or not path.is_file():
+            logger.error("Discord 文件不存在，无法发送: %s", file_path)
+            return False
+
+        if self._discord_config['webhook_url']:
+            return self._send_discord_webhook_file(
+                content,
+                path,
+                timeout_seconds=timeout_seconds,
+            )
+
+        if self._discord_config['bot_token'] and self._discord_config['channel_id']:
+            return self._send_discord_bot_file(
+                content,
+                path,
+                timeout_seconds=timeout_seconds,
+            )
+
+        logger.warning("Discord 配置不完整，跳过文件推送")
+        return False
+
     def _split_discord_content(self, content: str) -> list[str]:
         """按 Discord content 上限拆分消息。"""
         try:
@@ -165,6 +197,28 @@ class DiscordSender:
             timeout_seconds=timeout_seconds,
             channel_name="Webhook",
         )
+
+    def _send_discord_webhook_file(
+        self,
+        content: str,
+        path: Path,
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> bool:
+        payload = {
+            'content': content[:DISCORD_MAX_CONTENT_LENGTH],
+            'username': 'A股分析机器人',
+            'avatar_url': 'https://picsum.photos/200',
+        }
+        return self._post_discord_file(
+            self._discord_config['webhook_url'],
+            payload,
+            path,
+            success_statuses=(200, 204),
+            verify=self._webhook_verify_ssl,
+            timeout_seconds=timeout_seconds,
+            channel_name="Webhook",
+        )
     
     def _send_discord_bot(self, content: str, *, timeout_seconds: Optional[float] = None) -> bool:
         """
@@ -191,6 +245,115 @@ class DiscordSender:
             timeout_seconds=timeout_seconds,
             channel_name="Bot",
         )
+
+    def _send_discord_bot_file(
+        self,
+        content: str,
+        path: Path,
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> bool:
+        headers = {
+            'Authorization': f'Bot {self._discord_config["bot_token"]}',
+        }
+        payload = {'content': content[:DISCORD_MAX_CONTENT_LENGTH]}
+        url = f'https://discord.com/api/v10/channels/{self._discord_config["channel_id"]}/messages'
+        return self._post_discord_file(
+            url,
+            payload,
+            path,
+            headers=headers,
+            success_statuses=(200,),
+            timeout_seconds=timeout_seconds,
+            channel_name="Bot",
+        )
+
+    def _post_discord_file(
+        self,
+        url: str,
+        payload: dict,
+        path: Path,
+        *,
+        success_statuses: tuple[int, ...],
+        headers: Optional[dict] = None,
+        verify: Optional[bool] = None,
+        timeout_seconds: Optional[float] = None,
+        channel_name: str,
+    ) -> bool:
+        mime_type = "text/markdown" if path.suffix.lower() == ".md" else "application/octet-stream"
+        for attempt in range(1, DISCORD_MAX_RETRIES + 1):
+            try:
+                with path.open("rb") as fh:
+                    files = {
+                        "files[0]": (path.name, fh, mime_type),
+                    }
+                    data = {
+                        "payload_json": json.dumps(payload, ensure_ascii=False),
+                    }
+                    request_kwargs = {
+                        "data": data,
+                        "files": files,
+                        "timeout": timeout_seconds or 30,
+                    }
+                    if headers:
+                        request_kwargs["headers"] = headers
+                    if verify is not None:
+                        request_kwargs["verify"] = verify
+                    response = requests.post(url, **request_kwargs)
+            except requests.exceptions.RequestException as e:
+                if attempt < DISCORD_MAX_RETRIES:
+                    delay = 2 ** attempt
+                    logger.warning(
+                        "Discord %s 文件请求异常（%d/%d）：%s，%s 秒后重试",
+                        channel_name,
+                        attempt,
+                        DISCORD_MAX_RETRIES,
+                        e,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.error("Discord %s 文件请求重试后仍失败: %s", channel_name, e)
+                return False
+
+            if response.status_code in success_statuses:
+                logger.info("Discord %s 文件发送成功: %s", channel_name, path.name)
+                return True
+
+            if response.status_code == 429 and attempt < DISCORD_MAX_RETRIES:
+                retry_after = self._get_retry_after_seconds(response, attempt)
+                logger.warning(
+                    "Discord %s 文件触发限流，%s 秒后重试（%d/%d）",
+                    channel_name,
+                    retry_after,
+                    attempt,
+                    DISCORD_MAX_RETRIES,
+                )
+                time.sleep(retry_after)
+                continue
+
+            if response.status_code >= 500 and attempt < DISCORD_MAX_RETRIES:
+                delay = 2 ** attempt
+                logger.warning(
+                    "Discord %s 文件服务端错误 HTTP %s（%d/%d），%s 秒后重试",
+                    channel_name,
+                    response.status_code,
+                    attempt,
+                    DISCORD_MAX_RETRIES,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+
+            logger.error(
+                "Discord %s 文件发送失败: %s %s",
+                channel_name,
+                response.status_code,
+                response.text,
+            )
+            return False
+
+        return False
 
     def _post_discord_message(
         self,
