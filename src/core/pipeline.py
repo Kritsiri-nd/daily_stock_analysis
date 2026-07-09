@@ -18,6 +18,7 @@ import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import List, Dict, Any, Optional, Tuple, Callable
 
@@ -221,45 +222,57 @@ def _format_discord_stock_summary(result: AnalysisResult, language: str) -> str:
 
     if language == "th":
         lines = [
-            title,
-            f"สัญญาณ: **{action}** | คะแนน {score_text} | แนวโน้ม {trend} | ความมั่นใจ {confidence}",
+            f"## 📌 {title}",
+            "",
+            f"🧭 **สัญญาณ:** {action}  |  **คะแนน:** {score_text}  |  **แนวโน้ม:** {trend}",
+            f"🎚️ **ความมั่นใจ:** {confidence}",
         ]
         if one_line:
-            lines.append(f"สรุป: {one_line}")
+            lines.append(f"📝 **สรุป:** {one_line}")
         lines.extend(
             [
-                f"จุดเข้า: {ideal}",
-                f"จุดตัดขาดทุน: {stop}",
-                f"เป้าหมาย: {target}",
-                f"จับตา: {watch}",
-                f"ความเสี่ยง: {risk}",
+                "",
+                "**แผนเทรด**",
+                f"🎯 **จุดเข้า:** {ideal}",
+                f"🛑 **จุดตัดขาดทุน:** {stop}",
+                f"💰 **เป้าหมาย:** {target}",
+                "",
+                "**สิ่งที่ต้องติดตาม**",
+                f"👀 **จับตา:** {watch}",
+                f"⚠️ **ความเสี่ยง:** {risk}",
             ]
         )
         if no_position:
-            lines.append(f"ยังไม่มีของ: {no_position}")
+            lines.append(f"🆕 **ยังไม่มีของ:** {no_position}")
         if holding:
-            lines.append(f"ถืออยู่: {holding}")
+            lines.append(f"💼 **ถืออยู่:** {holding}")
         return "\n".join(lines)
 
     lines = [
-        title,
-        f"Action: **{action}** | Score {score_text} | Trend {trend} | Confidence {confidence}",
+        f"## 📌 {title}",
+        "",
+        f"🧭 **Action:** {action}  |  **Score:** {score_text}  |  **Trend:** {trend}",
+        f"🎚️ **Confidence:** {confidence}",
     ]
     if one_line:
-        lines.append(f"Summary: {one_line}")
+        lines.append(f"📝 **Summary:** {one_line}")
     lines.extend(
         [
-            f"Entry: {ideal}",
-            f"Stop: {stop}",
-            f"Target: {target}",
-            f"Watch: {watch}",
-            f"Risk: {risk}",
+            "",
+            "**Trade Plan**",
+            f"🎯 **Entry:** {ideal}",
+            f"🛑 **Stop:** {stop}",
+            f"💰 **Target:** {target}",
+            "",
+            "**Watchlist**",
+            f"👀 **Watch:** {watch}",
+            f"⚠️ **Risk:** {risk}",
         ]
     )
     if no_position:
-        lines.append(f"No position: {no_position}")
+        lines.append(f"🆕 **No position:** {no_position}")
     if holding:
-        lines.append(f"Holding: {holding}")
+        lines.append(f"💼 **Holding:** {holding}")
     return "\n".join(lines)
 
 
@@ -275,27 +288,22 @@ def _generate_discord_report_summary(results: List[AnalysisResult], report_type:
 
     if language == "th":
         header = [
-            f"🎯 **{today} สรุปหุ้นแบบอ่านง่าย**",
-            f"วิเคราะห์ {len(valid_results)} หุ้น | ซื้อ {buy_count} | รอดู {watch_count} | ขาย {sell_count}",
-            "",
+            f"🎯 **สรุปหุ้นประจำวันที่ {today}**",
+            f"📊 วิเคราะห์ **{len(valid_results)}** หุ้น  •  🟢 ซื้อ {buy_count}  •  🟡 รอดู {watch_count}  •  🔴 ขาย {sell_count}",
         ]
-        footer = [
-            "",
-            "รายงานเต็มยังถูกบันทึกเป็นไฟล์ Markdown (`reports/report_YYYYMMDD.md`) สำหรับดูรายละเอียด/ตารางครบถ้วน",
-        ]
+        footer = ["📎 แนบรายงานเต็มแบบ Markdown ไว้ด้านล่าง เปิดดูรายละเอียดและตารางเต็มได้จากไฟล์แนบ"]
     else:
         header = [
-            f"🎯 **{today} Stock Summary**",
-            f"Analyzed {len(valid_results)} stocks | Buy {buy_count} | Watch {watch_count} | Sell {sell_count}",
-            "",
+            f"🎯 **Stock Summary for {today}**",
+            f"📊 Analyzed **{len(valid_results)}** stocks  •  🟢 Buy {buy_count}  •  🟡 Watch {watch_count}  •  🔴 Sell {sell_count}",
         ]
-        footer = [
-            "",
-            "Full Markdown report is still saved as `reports/report_YYYYMMDD.md` for detailed tables.",
-        ]
+        footer = ["📎 Full Markdown report is attached below for detailed tables."]
 
     sections = [_format_discord_stock_summary(result, language) for result in valid_results]
-    return "\n\n---\n\n".join(header + sections + footer)
+    body_parts = ["\n".join(header)]
+    body_parts.extend(section for section in sections if section.strip())
+    body_parts.append("\n".join(footer))
+    return "\n\n".join(body_parts)
 
 
 class StockAnalysisPipeline:
@@ -3648,10 +3656,27 @@ class StockAnalysisPipeline:
                         def _send_discord_report() -> bool:
                             discord_summary = _generate_discord_report_summary(results, report_type)
                             date_str = datetime.now().strftime('%Y%m%d')
-                            filepath = self.notifier.save_report_to_file(
+                            markdown_path = self.notifier.save_report_to_file(
                                 report,
                                 filename=f"dashboard_{date_str}.md",
                             )
+                            filepath = markdown_path
+                            try:
+                                from src.pdf_report import markdown_to_pdf_file
+
+                                pdf_path = markdown_to_pdf_file(
+                                    report,
+                                    str(Path(markdown_path).with_suffix(".pdf")),
+                                )
+                                if pdf_path:
+                                    filepath = pdf_path
+                                else:
+                                    logger.warning("Discord PDF report conversion failed; falling back to Markdown attachment")
+                            except Exception as exc:
+                                logger.exception(
+                                    "Discord PDF report conversion raised; falling back to Markdown attachment: %s",
+                                    exc,
+                                )
                             send_file = getattr(self.notifier, "send_discord_file", None)
                             if callable(send_file):
                                 return bool(send_file(discord_summary, filepath))
