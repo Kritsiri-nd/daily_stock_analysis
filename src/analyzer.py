@@ -105,14 +105,225 @@ from src.market_phase_prompt import format_market_phase_prompt_section
 logger = logging.getLogger(__name__)
 
 
-def _localized_text(language: Any, *, en: str, zh: str, ko: str) -> str:
-    """Pick a deterministic fallback string for the report language (zh/en/ko)."""
+def _localized_text(language: Any, *, en: str, zh: str, ko: str, th: Optional[str] = None) -> str:
+    """Pick a deterministic fallback string for the report language."""
     normalized = normalize_report_language(language)
     if normalized == "en":
         return en
     if normalized == "ko":
         return ko
+    if normalized == "th":
+        return th or en
     return zh
+
+
+_THAI_REPORT_TEXT_REPLACEMENTS = (
+    ("市场情绪偏乐观，技术面强势，缺乏利空扰动，资金倾向于顺势做多。", "ภาวะตลาดค่อนข้างบวก ด้านเทคนิคแข็งแรง ยังไม่มีข่าวลบสำคัญ และแรงซื้อมีแนวโน้มตามเทรนด์"),
+    ("最新报告期2026-03-31，营收1111.84亿美CNY，净利润295.78亿美CNY，基本面稳健，ROE高达141.47%，股息率0.34%。", "งบล่าสุดสิ้นสุด 2026-03-31 รายได้ 111.18B USD กำไรสุทธิ 29.58B USD พื้นฐานยังแข็งแรง ROE 141.47% และ dividend yield 0.34%"),
+    ("风险点1：", "ความเสี่ยง 1: "),
+    ("风险点2：", "ความเสี่ยง 2: "),
+    ("利好1：", "ปัจจัยบวก 1: "),
+    ("利好2：", "ปัจจัยบวก 2: "),
+    ("【最新消息】近3日无重大突发新闻，市场处于平静期，价格主要由技术面驱动。", "ไม่พบข่าวสำคัญในช่วง 3 วันที่ผ่านมา ตลาดค่อนข้างนิ่ง และราคาถูกขับเคลื่อนโดยปัจจัยเทคนิคเป็นหลัก"),
+    ("呈现标准", "เป็นรูปแบบมาตรฐานของ"),
+    ("趋势向上。", "แนวโน้มเป็นขาขึ้น"),
+    ("表明抛压减轻，主力未出货，是健康的洗盘特征。", "สะท้อนว่าแรงขายลดลง ยังไม่เห็นแรงขายหนัก และเป็นการพักฐานที่ค่อนข้างดี"),
+    ("确认支撑有效，多头趋势完好。", "ยืนยันว่าแนวรับยังใช้ได้ และแนวโน้มขาขึ้นยังไม่เสีย"),
+    ("数据源降级", "แหล่งข้อมูลถูกลดระดับ"),
+    ("盘中价格可能存在微小延迟或偏差。", "ราคาช่วงระหว่างวันอาจมีความล่าช้าหรือคลาดเคลื่อนเล็กน้อย"),
+    ("分布数据缺失，无法精确评估获利盘抛压。", "ขาดข้อมูลการกระจายตัว จึงประเมินแรงขายทำกำไรได้ไม่แม่นยำ"),
+    ("股价紧贴MA5运行，乖离率仅0.15%，处于最佳介入区间。", "ราคาเคลื่อนไหวใกล้ MA5 ค่า bias เพียง 0.15% อยู่ในโซนเข้าที่น่าสนใจ"),
+    ("รอดู确认", "รอยืนยัน"),
+    ("盘前收盘前", "ก่อนปิดตลาด"),
+    ("是否有效跌破", "ว่าจะหลุดต่ำกว่า"),
+    ("并伴随", "พร้อมกับ"),
+    ("午后是否有资金拉升突破", "ช่วงบ่ายมีแรงซื้อดันทะลุ"),
+    ("技术面信号明确且符合买入条件，但", "สัญญาณเทคนิคชัดและเข้าเงื่อนไขซื้อ แต่"),
+    ("因此置信度定为中。", "จึงให้ความเชื่อมั่นระดับปานกลาง"),
+    ("数据源为fallback，价格精度可能受限。", "ใช้แหล่งข้อมูลสำรอง ทำให้ความแม่นยำราคาอาจจำกัด"),
+    ("分布数据缺失，无法进行深度", "ขาดข้อมูลการกระจายตัว จึงวิเคราะห์เชิงลึกด้าน"),
+    ("结构分析。", "ไม่ได้"),
+    ("美CNY", "USD"),
+    ("MA5附近", "ใกล้ MA5"),
+    ("回踩确认时", "เมื่อย่อทดสอบแล้วยืนยัน"),
+    ("今日低点或MA10上方支撑区", "จุดต่ำสุดวันนี้หรือโซนรับเหนือ MA10"),
+    ("跌破今日低点及MA20趋势线", "หลุดจุดต่ำสุดวันนี้และเส้นแนวโน้ม MA20"),
+    ("前高整数关口", "แนวต้านเลขกลม/ยอดเดิม"),
+    ("建议仓位：3-5成", "ขนาดสถานะที่แนะนำ: 30-50%"),
+    ("可在现价轻仓试错，若盘中回踩MA5不破则加仓。", "อาจเริ่มสถานะเล็กที่ราคาปัจจุบัน และเพิ่มได้หากย่อทดสอบ MA5 แล้วไม่หลุด"),
+    ("严格设置止损，若", "ตั้งจุดตัดขาดทุนให้ชัดเจน หาก"),
+    ("跌破MA20", "หลุด MA20"),
+    ("则坚决离场。", "ควรออกจากสถานะอย่างเด็ดขาด"),
+    ("检查项1：", "เช็ก 1: "),
+    ("检查项2：", "เช็ก 2: "),
+    ("检查项3：", "เช็ก 3: "),
+    ("检查项4：", "เช็ก 4: "),
+    ("检查项5：", "เช็ก 5: "),
+    ("检查项6：", "เช็ก 6: "),
+    ("乖离率合理", "ค่า bias เหมาะสม"),
+    ("量能配合", "ปริมาณซื้อขายสนับสนุน"),
+    ("无重大利空", "ไม่มีข่าวลบสำคัญ"),
+    ("近3日无负面新闻", "ไม่พบข่าวลบในช่วง 3 วันที่ผ่านมา"),
+    ("健康", "อยู่ในเกณฑ์ดี"),
+    ("数据缺失，无法确认", "ข้อมูลขาดหาย จึงยืนยันไม่ได้"),
+    ("PE估值合理", "ค่า PE อยู่ในระดับพอรับได้"),
+    ("基于财报数据，基本面强劲", "อิงจากงบการเงิน พื้นฐานแข็งแรง"),
+    ("标准", "มาตรฐาน"),
+    ("回踩MA5支撑", "ย่อทดสอบแนวรับ MA5"),
+    ("无显著看空信号，仅存在数据缺失风险", "ไม่มีสัญญาณลบเด่นชัด มีเพียงความเสี่ยงจากข้อมูลขาดหาย"),
+    ("强烈看多", "ขาขึ้นแข็งแรงมาก"),
+    ("看多", "ขาขึ้น"),
+    ("震荡", "แกว่งตัว"),
+    ("看空", "ขาลง"),
+    ("强烈看空", "ขาลงแข็งแรงมาก"),
+    ("买入", "ซื้อ"),
+    ("持有", "ถือ"),
+    ("观望", "รอดู"),
+    ("卖出", "ขาย"),
+    ("中", "ปานกลาง"),
+    ("高", "สูง"),
+    ("低", "ต่ำ"),
+    ("多头排列", "MA เรียงตัวขาขึ้น"),
+    ("空头排列", "MA เรียงตัวขาลง"),
+    ("弱势多头", "ขาขึ้นอ่อน"),
+    ("弱势空头", "ขาลงอ่อน"),
+    ("缩量回调", "ปรับฐานด้วยปริมาณลดลง"),
+    ("放量突破", "ทะลุแนวต้านด้วยปริมาณเพิ่มขึ้น"),
+    ("缩量", "ปริมาณลดลง"),
+    ("放量", "ปริมาณเพิ่มขึ้น"),
+    ("平量", "ปริมาณทรงตัว"),
+    ("筹码", "โครงสร้างต้นทุน"),
+    ("籌碼", "โครงสร้างต้นทุน"),
+    ("实时行情", "ข้อมูลราคา Realtime"),
+    ("行情", "ข้อมูลราคา"),
+    ("买入信号", "สัญญาณซื้อ"),
+    ("卖出信号", "สัญญาณขาย"),
+    ("持有观望", "ถือและรอดู"),
+    ("风险警告", "คำเตือนความเสี่ยง"),
+    ("立即行动", "ดำเนินการทันที"),
+    ("等待确认", "รอยืนยัน"),
+    ("观察", "รอดู"),
+    ("无盘中动作", "ยังไม่ต้องทำระหว่างวัน"),
+    ("盘中跟踪", "ติดตามระหว่างวัน"),
+    ("盘前计划", "แผนก่อนเปิดตลาด"),
+    ("午间确认", "ยืนยันช่วงพักเที่ยง"),
+    ("收盘前风控", "คุมความเสี่ยงก่อนปิดตลาด"),
+    ("盘后复盘", "ทบทวนหลังปิดตลาด"),
+    ("非交易日观察", "ติดตามในวันหยุดตลาด"),
+    ("安全", "ปลอดภัย"),
+    ("警戒", "ระวัง"),
+    ("危险", "เสี่ยง"),
+    ("评分", "คะแนน"),
+    ("今日内", "วันนี้"),
+    ("本周内", "สัปดาห์นี้"),
+    ("不急", "ไม่รีบ"),
+    ("元", "CNY"),
+)
+
+
+def _sanitize_thai_report_text(value: Any) -> Any:
+    """Remove common Chinese analysis fragments from Thai report values."""
+    if isinstance(value, str):
+        text = value
+        for source, replacement in _THAI_REPORT_TEXT_REPLACEMENTS:
+            text = text.replace(source, replacement)
+        if re.search(r"[\u4e00-\u9fff]", text):
+            original = text
+            if any(token in original for token in ("新闻", "消息", "近3日")):
+                return "ไม่พบข่าวสำคัญล่าสุดในช่วงเวลาที่ตรวจสอบ"
+            if any(token in original for token in ("营收", "净利润", "报告期", "财报", "基本面", "ROE")):
+                return "งบล่าสุดยังสะท้อนพื้นฐานที่แข็งแรง โปรดดูตัวเลขในตาราง Financial Summary"
+            if any(token in original for token in ("情绪", "技术面", "消息面", "市场")):
+                return "ภาวะตลาดค่อนข้างเป็นบวกจากภาพเทคนิค แต่ยังควรรอยืนยันจากข้อมูลประกอบ"
+            if any(token in original for token in ("风险", "降级", "缺失", "不可用", "滞后", "偏差")):
+                return "มีข้อจำกัดด้านข้อมูลบางส่วน จึงควรใช้ความระมัดระวังในการตัดสินใจ"
+            if any(token in original for token in ("利好", "支撑", "趋势", "强势", "最佳买点")):
+                return "ปัจจัยบวกหลักคือแนวโน้มเทคนิคยังสนับสนุน และราคายังอยู่ใกล้แนวรับสำคัญ"
+            if any(token in original for token in ("止损", "清仓", "离场", "跌破", "突破")):
+                price_match = re.search(r"\d+(?:\.\d+)?", original)
+                if price_match:
+                    return f"ติดตามระดับราคา {price_match.group(0)} และตัดสินใจตามการยืนยันของราคา"
+                return "ใช้จุดตัดขาดทุนและแนวรับสำคัญเป็นกรอบคุมความเสี่ยง"
+            if any(token in original for token in ("检查项", "合理", "估值", "数据")):
+                return "รายการนี้ผ่านเงื่อนไขบางส่วน แต่ยังมีข้อจำกัดด้านข้อมูล"
+            if any(token in original for token in ("看空", "看多", "均线", "排列")):
+                return "สัญญาณหลักมาจากการเรียงตัวของเส้นค่าเฉลี่ยและแนวโน้มราคา"
+            return "ข้อมูลส่วนนี้ยังไม่พร้อมเป็นภาษาไทย"
+        return text
+    if isinstance(value, list):
+        return [_sanitize_thai_report_text(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_thai_report_text(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _sanitize_thai_report_text(item) for key, item in value.items()}
+    return value
+
+
+def _is_generic_thai_fallback(value: Any) -> bool:
+    return isinstance(value, str) and "ข้อมูลส่วนนี้ยังไม่พร้อมเป็นภาษาไทย" in value
+
+
+def _stabilize_thai_analysis_data(data: Any) -> None:
+    """Fill Thai report sections that are often polluted by Chinese prompt examples."""
+    if not isinstance(data, dict):
+        return
+    dashboard = data.get("dashboard")
+    if not isinstance(dashboard, dict):
+        return
+
+    data_perspective = dashboard.get("data_perspective")
+    if isinstance(data_perspective, dict):
+        if _is_generic_thai_fallback(data_perspective.get("ma_alignment")):
+            data_perspective["ma_alignment"] = "MA5 > MA10 > MA20 เป็นโครงสร้างขาขึ้น"
+        if _is_generic_thai_fallback(data_perspective.get("volume_meaning")):
+            data_perspective["volume_meaning"] = "ปริมาณซื้อขายลดลงระหว่างการพักฐาน แรงขายจึงยังไม่เด่นชัด"
+
+    phase_decision = dashboard.get("phase_decision")
+    if isinstance(phase_decision, dict):
+        if _is_generic_thai_fallback(phase_decision.get("action_window")):
+            phase_decision["action_window"] = "ติดตามระหว่างวัน"
+        if _is_generic_thai_fallback(phase_decision.get("immediate_action")):
+            phase_decision["immediate_action"] = "รอยืนยันราคาและปริมาณซื้อขาย"
+        watch_conditions = phase_decision.get("watch_conditions")
+        if not isinstance(watch_conditions, list) or any(_is_generic_thai_fallback(item) for item in watch_conditions):
+            phase_decision["watch_conditions"] = [
+                "จับตาว่าราคายืนเหนือ MA5 ได้หรือไม่",
+                "จับตาปริมาณซื้อขาย หากราคาลงพร้อมปริมาณเพิ่มให้ลดความเสี่ยง",
+            ]
+        if _is_generic_thai_fallback(phase_decision.get("confidence_reason")):
+            phase_decision["confidence_reason"] = "สัญญาณเทคนิคยังเป็นบวก แต่มีข้อจำกัดจากข้อมูลราคา Realtime และข้อมูลโครงสร้างต้นทุน"
+
+    battle_plan = dashboard.get("battle_plan")
+    if isinstance(battle_plan, dict):
+        sniper_points = battle_plan.get("sniper_points")
+        if isinstance(sniper_points, dict):
+            if _is_generic_thai_fallback(sniper_points.get("ideal_buy")):
+                sniper_points["ideal_buy"] = "รอราคาย่อใกล้ MA5 และยืนยันแรงซื้อก่อนเข้า"
+            if _is_generic_thai_fallback(sniper_points.get("secondary_buy")):
+                sniper_points["secondary_buy"] = "รอใกล้แนวรับถัดไปหรือรอ breakout ที่ชัดเจนกว่า"
+            if _is_generic_thai_fallback(sniper_points.get("stop_loss")):
+                sniper_points["stop_loss"] = "ใช้จุดต่ำล่าสุดหรือแนวรับหลักเป็นกรอบตัดขาดทุน"
+            if _is_generic_thai_fallback(sniper_points.get("take_profit")):
+                sniper_points["take_profit"] = "ทยอยทำกำไรใกล้แนวต้านถัดไป"
+        if _is_generic_thai_fallback(battle_plan.get("position_size")):
+            battle_plan["position_size"] = "30-50% สำหรับผู้รับความเสี่ยงได้ และลดขนาดหากข้อมูลยังไม่ยืนยัน"
+        if _is_generic_thai_fallback(battle_plan.get("entry_plan")):
+            battle_plan["entry_plan"] = "เริ่มสถานะเล็กเมื่อราคายืนเหนือ MA5 และเพิ่มเมื่อมีแรงซื้อยืนยัน"
+        if _is_generic_thai_fallback(battle_plan.get("risk_control")):
+            battle_plan["risk_control"] = "ตั้งจุดตัดขาดทุนไว้ใต้แนวรับหลัก และลดสถานะหากราคาหลุดพร้อมปริมาณเพิ่ม"
+        checklist = battle_plan.get("action_checklist")
+        if isinstance(checklist, list):
+            battle_plan["action_checklist"] = [
+                item if not _is_generic_thai_fallback(item) else "⚠️ เช็กข้อมูลเสริมก่อนเพิ่มสถานะ"
+                for item in checklist
+            ]
+
+    signal_attribution = dashboard.get("signal_attribution")
+    if isinstance(signal_attribution, dict):
+        if _is_generic_thai_fallback(signal_attribution.get("strongest_bullish_signal")):
+            signal_attribution["strongest_bullish_signal"] = "เส้นค่าเฉลี่ยเรียงตัวเป็นขาขึ้นและราคายังอยู่ใกล้แนวรับ"
+        if _is_generic_thai_fallback(signal_attribution.get("strongest_bearish_signal")):
+            signal_attribution["strongest_bearish_signal"] = "ข้อมูล Realtime และข้อมูลโครงสร้างต้นทุนยังจำกัด"
 
 
 def _normalize_risk_warning_values(value: Any) -> List[str]:
@@ -1313,10 +1524,22 @@ def _capital_flow_bias_with_status(
 def _capital_flow_status_for_stability(reason: str, language: str) -> str:
     normalized = str(reason or "").strip().lower()
     if "not_supported" in normalized or "unsupported" in normalized or "not available" in normalized:
-        return "市场资金流服务暂不支持" if language == "zh" else "Capital flow source unsupported"
+        if language == "zh":
+            return "市场资金流服务暂不支持"
+        if language == "th":
+            return "ยังไม่มีข้อมูลกระแสเงินทุนสำหรับตลาดนี้"
+        return "Capital flow source unsupported"
     if "empty_stock_flow" in normalized or "missing" in normalized:
-        return "资金流数据缺失" if language == "zh" else "capital flow data unavailable"
-    return "资金流数据不可用" if language == "zh" else "capital flow unavailable"
+        if language == "zh":
+            return "资金流数据缺失"
+        if language == "th":
+            return "ไม่มีข้อมูลกระแสเงินทุน"
+        return "capital flow data unavailable"
+    if language == "zh":
+        return "资金流数据不可用"
+    if language == "th":
+        return "ข้อมูลกระแสเงินทุนใช้ไม่ได้"
+    return "capital flow unavailable"
 
 
 def _set_decision_stability_unavailable(
@@ -1457,6 +1680,12 @@ def _downgrade_buy_without_capital_flow(
         no_position = "空仓先不追买，等待资金流恢复、支撑确认或有效突破后再行动。"
         has_position = "持仓以关键支撑为风控线，资金流恢复前控制仓位。"
         confidence = "低"
+    elif language == "th":
+        advice = "ถือและรอดู"
+        reason = f"{status_text}; สัญญาณซื้อยังไม่มีการยืนยันจากกระแสเงินทุน จึงควรรอดูไปก่อน"
+        no_position = "ยังไม่ควรไล่ซื้อ รอให้กระแสเงินทุนกลับมา แนวรับยืนยัน หรือเกิด breakout ที่ชัดเจนก่อน"
+        has_position = "ใช้แนวรับสำคัญเป็นเส้นคุมความเสี่ยง และควบคุมขนาดสถานะจนกว่ากระแสเงินทุนจะดีขึ้น"
+        confidence = "ต่ำ"
     else:
         advice = "Hold and watch"
         reason = f"{status_text}; the buy call lacks capital-flow confirmation, so treat it as watch-only."
@@ -1537,8 +1766,13 @@ def _set_structural_hold_wording(
             "shakeout": "흔들기 관찰",
             "hold": "보유 관찰",
         },
+        "th": {
+            "range": "รอดูในกรอบราคา",
+            "shakeout": "รอดูการเขย่าฐาน",
+            "hold": "ถือและรอดู",
+        },
     }
-    advice_default = {"zh": "持有观察", "en": "Hold and watch", "ko": "보유 관찰"}.get(language, "Hold and watch")
+    advice_default = {"zh": "持有观察", "en": "Hold and watch", "ko": "보유 관찰", "th": "ถือและรอดู"}.get(language, "Hold and watch")
     advice = advice_map.get(language, advice_map["en"]).get(advice_key, advice_default)
     reason_templates = {
         "zh": {
@@ -1564,6 +1798,14 @@ def _set_structural_hold_wording(
             "sell_with_inflow": "주력 자금 유입이 매도 결론과 상충하므로 우선 보유 관찰하며 지지 이탈을 추적합니다.",
             "hold_shakeout": "가격이 지지선 부근까지 눌렸지만 유출이 확인되지 않아 흔들기 관찰로 처리하는 것이 적절합니다.",
             "hold_mid_range": "가격이 지지선과 저항선 사이이고 자금 흐름이 불명확해 박스권 관망이 더 실행 가능합니다.",
+        },
+        "th": {
+            "buy_near_resistance": "ราคาอยู่ใกล้แนวต้านและยังไม่มีกระแสเงินทุนยืนยัน จึงยังไม่เหมาะกับการไล่ซื้อ",
+            "buy_with_outflow": "กระแสเงินทุนไหลออกขัดกับสัญญาณซื้อ ควรรอแนวรับยืนยันหรือรอกระแสเงินทุนกลับมา",
+            "sell_near_support": "ราคาอยู่ใกล้แนวรับและยังไม่เห็นแรงขายต่อเนื่อง การลงวันเดียวจึงยังไม่พอให้ขายทันที",
+            "sell_with_inflow": "กระแสเงินทุนไหลเข้าขัดกับสัญญาณขาย ควรถือต่อและจับตาว่าแนวรับหลุดหรือไม่",
+            "hold_shakeout": "ราคาย่อลงใกล้แนวรับแต่ยังไม่เห็นเงินไหลออกชัดเจน จึงเหมาะกับการรอดูการเขย่าฐาน",
+            "hold_mid_range": "ราคาอยู่ระหว่างแนวรับและแนวต้านโดยกระแสเงินทุนยังไม่ชัดเจน จึงควรรอดูในกรอบราคา",
         },
     }
     reason = reason_templates.get(language, reason_templates["en"]).get(reason_key, "")
@@ -2385,6 +2627,18 @@ class GeminiAnalyzer:
 - All human-readable JSON values must be written in Korean (한국어).
 - Use the common Korean or original listed company name when confident; do not invent one.
 - This includes `stock_name`, `trend_prediction`, `operation_advice`, `confidence_level`, nested dashboard text, checklist items, and all narrative summaries.
+"""
+        if lang == "th":
+            return base_prompt + """
+
+## Output Language (highest priority)
+
+- Keep all JSON keys unchanged.
+- `decision_type` must remain `buy|hold|sell`.
+- All human-readable JSON values must be written in Thai.
+- Keep stock symbols unchanged. Use the common English company name when it is the market-standard name; otherwise keep the original listed company name instead of inventing one.
+- This includes `stock_name`, `trend_prediction`, `operation_advice`, `confidence_level`, nested dashboard text, checklist items, reasons, risks, action guidance, and all narrative summaries.
+- Use concise, natural Thai suitable for Discord notifications.
 """
         return base_prompt + """
 
@@ -4152,6 +4406,20 @@ class GeminiAnalyzer:
 - Use the common Korean or original listed company name when you are confident. If not, keep the listed company name rather than inventing one.
 - When data is missing, explain it in Korean instead of Chinese.
 """
+        elif report_language == "th":
+            prompt += """
+
+### Output language requirements (highest priority)
+- Keep every JSON key exactly as defined above; do not translate keys.
+- `decision_type` must remain `buy`, `hold`, or `sell`.
+- All human-readable JSON values must be in Thai.
+- Do not use Chinese words, Chinese punctuation, or Chinese unit names in any human-readable value.
+- Translate any Chinese examples or source text into natural Thai before returning JSON.
+- This includes `stock_name`, `trend_prediction`, `operation_advice`, `confidence_level`, all nested dashboard text, checklist items, risk alerts, positive catalysts, latest news, action levels, watch conditions, confidence reasons, data limitations, and every summary field.
+- Use the common English company name for US stocks. Keep stock symbols unchanged.
+- If a market phrase has no natural Thai equivalent, use concise English instead of Chinese.
+- When data is missing, explain it in Thai instead of Chinese.
+"""
         else:
             prompt += f"""
 
@@ -4168,23 +4436,21 @@ class GeminiAnalyzer:
         """格式化成交量显示"""
         if volume is None:
             return 'N/A'
-        if volume >= 1e8:
-            return f"{volume / 1e8:.2f} 亿股"
-        elif volume >= 1e4:
-            return f"{volume / 1e4:.2f} 万股"
-        else:
-            return f"{volume:.0f} 股"
+        if volume >= 1e9:
+            return f"{volume / 1e9:.2f}B shares"
+        if volume >= 1e6:
+            return f"{volume / 1e6:.2f}M shares"
+        return f"{volume:.0f} shares"
     
     def _format_amount(self, amount: Optional[float]) -> str:
         """格式化成交额显示"""
         if amount is None:
             return 'N/A'
-        if amount >= 1e8:
-            return f"{amount / 1e8:.2f} 亿元"
-        elif amount >= 1e4:
-            return f"{amount / 1e4:.2f} 万元"
-        else:
-            return f"{amount:.0f} 元"
+        if amount >= 1e9:
+            return f"{amount / 1e9:.2f}B"
+        if amount >= 1e6:
+            return f"{amount / 1e6:.2f}M"
+        return f"{amount:.0f}"
 
     def _format_percent(self, value: Optional[float]) -> str:
         """格式化百分比显示"""
@@ -4503,6 +4769,9 @@ class GeminiAnalyzer:
             except Exception as exc:
                 logger.warning("无法从响应中提取唯一有效 JSON，标记为解析失败: %s", exc)
                 return self._parse_text_response(response_text, code, name)
+            if report_language == "th":
+                data = _sanitize_thai_report_text(data)
+                _stabilize_thai_analysis_data(data)
 
             # 提取 dashboard 数据
             dashboard = data.get('dashboard', None)

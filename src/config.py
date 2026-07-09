@@ -2563,7 +2563,7 @@ class Config:
         raw = (value or "").strip()
         if raw and not is_supported_report_language_value(raw):
             logging.getLogger(__name__).warning(
-                "REPORT_LANGUAGE '%s' invalid, fallback to 'zh' (valid: zh/en)",
+                "REPORT_LANGUAGE '%s' invalid, fallback to 'zh' (valid: zh/en/ko/th)",
                 value,
             )
         return normalized
@@ -3411,6 +3411,22 @@ def extra_litellm_params(model: str, config: Config) -> Dict[str, Any]:
             params["api_base"] = config.openai_base_url
         if config.openai_base_url and "aihubmix.com" in config.openai_base_url:
             params["extra_headers"] = {"APP-Code": "GPIJ3886"}
+        if (
+            config.openai_base_url
+            and "gateway.9arm.co" in config.openai_base_url
+            and "qwen3.6-35b-a3b" in model
+        ):
+            params["extra_body"] = {
+                # 9arm's OpenAI-compatible gateway currently expects this vendor
+                # payload under a literal `extra_body` JSON field. LiteLLM expands
+                # its own extra_body by one level, so keep the provider payload
+                # nested to preserve the wire shape.
+                "extra_body": {
+                    "chat_template_kwargs": {
+                        "enable_thinking": False,
+                    },
+                }
+            }
     return params
 
 

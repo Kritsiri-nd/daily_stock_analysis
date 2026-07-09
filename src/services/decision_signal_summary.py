@@ -46,7 +46,7 @@ def format_decision_signal_excerpt(summary: Any, report_language: str = "zh") ->
 
     if not isinstance(summary, dict) or not summary:
         return ""
-    language = "en" if str(report_language or "").lower().startswith("en") else "zh"
+    language = "zh" if str(report_language or "").lower().startswith("zh") else "en"
     labels = {
         "zh": {
             "heading": "AI 决策信号",
@@ -99,9 +99,9 @@ def _public_text(value: Any, *, max_length: int) -> str:
     if value in (None, "", [], {}):
         return ""
     if isinstance(value, (list, tuple)):
-        text = "；".join(str(item).strip() for item in value if str(item or "").strip())
+        text = "; ".join(str(item).strip() for item in value if str(item or "").strip())
     elif isinstance(value, dict):
-        text = "；".join(
+        text = "; ".join(
             f"{key}: {item}"
             for key, item in value.items()
             if str(key or "").strip() and str(item or "").strip()

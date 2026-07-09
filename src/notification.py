@@ -1949,7 +1949,8 @@ class NotificationService(
         mapping = self._SOURCE_DISPLAY_NAMES.get(raw_source)
         if not mapping:
             return raw_source
-        return mapping[normalize_report_language(language)]
+        normalized_language = normalize_report_language(language)
+        return mapping.get(normalized_language) or mapping.get("en") or raw_source
 
     def _append_market_snapshot(self, lines: List[str], result: AnalysisResult) -> None:
         snapshot = getattr(result, 'market_snapshot', None)
@@ -1984,19 +1985,19 @@ class NotificationService(
         lines.append("")
 
     _CURRENCY_SUFFIX = {
-        "USD": "美元",
-        "HKD": "港元",
-        "CNY": "元",
-        "RMB": "元",
-        "CNH": "元",
-        "TWD": "新台币",  # 台股 (TWSE/TPEx) 以新台币计价，避免与 A 股「元」(人民币) 混淆
+        "USD": "USD",
+        "HKD": "HKD",
+        "CNY": "CNY",
+        "RMB": "CNY",
+        "CNH": "CNH",
+        "TWD": "TWD",
     }
 
     @classmethod
     def _format_amount_cn(cls, value: Any, currency: Optional[str] = None) -> str:
         """Format absolute amounts in 亿/万 + currency suffix; returns N/A on non-numeric.
 
-        ``currency`` accepts ``USD``/``HKD``/``CNY``; unknown values fall back to 元.
+        ``currency`` accepts ``USD``/``HKD``/``CNY``; unknown values fall back to CNY.
         """
         try:
             amount = float(value)
@@ -2006,11 +2007,11 @@ class NotificationService(
             return "N/A"
         sign = "-" if amount < 0 else ""
         abs_amount = abs(amount)
-        suffix = cls._CURRENCY_SUFFIX.get((currency or "").upper(), "元")
+        suffix = cls._CURRENCY_SUFFIX.get((currency or "").upper(), "CNY")
         if abs_amount >= 1e8:
-            return f"{sign}{abs_amount / 1e8:.2f} 亿{suffix}"
+            return f"{sign}{abs_amount / 1e9:.2f}B {suffix}"
         if abs_amount >= 1e4:
-            return f"{sign}{abs_amount / 1e4:.2f} 万{suffix}"
+            return f"{sign}{abs_amount / 1e6:.2f}M {suffix}"
         return f"{sign}{abs_amount:.0f} {suffix}"
 
     @staticmethod
@@ -2028,7 +2029,7 @@ class NotificationService(
             return "N/A"
         if amount != amount:  # NaN
             return "N/A"
-        suffix = cls._CURRENCY_SUFFIX.get((currency or "").upper(), "元")
+        suffix = cls._CURRENCY_SUFFIX.get((currency or "").upper(), "CNY")
         return f"{amount:.4f} {suffix}"
 
     @staticmethod
@@ -2205,9 +2206,10 @@ class NotificationService(
 
     @classmethod
     def _format_net_shares(cls, value: Any) -> str:
-        """Format an institutional net buy/sell in 万股/亿股, signed (+ = net buy).
+        """Format an institutional net buy/sell in shares, signed (+ = net buy).
 
-        Thresholds: abs >= 1e8 -> 亿股, >= 1e4 -> 万股, else 股. None/NaN/non-numeric -> N/A.
+        Thresholds: abs >= 1e9 -> B shares, >= 1e6 -> M shares, else shares.
+        None/NaN/non-numeric -> N/A.
         """
         try:
             amount = float(value)
@@ -2217,11 +2219,11 @@ class NotificationService(
             return "N/A"
         sign = "+" if amount > 0 else ("-" if amount < 0 else "")
         a = abs(amount)
-        if a >= 1e8:
-            return f"{sign}{a / 1e8:.2f} 亿股"
-        if a >= 1e4:
-            return f"{sign}{a / 1e4:.2f} 万股"
-        return f"{sign}{a:.0f} 股"
+        if a >= 1e9:
+            return f"{sign}{a / 1e9:.2f}B shares"
+        if a >= 1e6:
+            return f"{sign}{a / 1e6:.2f}M shares"
+        return f"{sign}{a:.0f} shares"
 
     def _append_institutional_flow(
         self,
